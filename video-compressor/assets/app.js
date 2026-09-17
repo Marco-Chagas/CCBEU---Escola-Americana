@@ -60,6 +60,8 @@ const el = {
   total: $("total"),
   registro: $("registro"),
   avisoNavegador: $("avisoNavegador"),
+  versao: $("versao"),
+  verificarAtualizacao: $("verificarAtualizacao"),
 };
 
 const CHAVE_OPCOES = "compressor-video:opcoes";
@@ -408,6 +410,7 @@ function montarControles() {
     opcoes.engine = el.motorCompressao.value;
     sincronizar();
     contarCapacidadesHardware();
+mostrarVersao();
   });
   el.crf.addEventListener("input", () => {
     opcoes.level = "custom";
@@ -1155,6 +1158,96 @@ function salvarOpcoes() {
 }
 
 // ---------------------------------------------------------------------------
+// Versao publicada
+//
+// Em vez de um numero de versao escrito na mao (que envelhece sem ninguem
+// notar), usamos a data de publicacao do proprio codigo, que o servidor
+// informa no cabecalho Last-Modified.
+// ---------------------------------------------------------------------------
+const ARQUIVOS_DO_APP = [
+  "./",
+  "assets/app.js",
+  "assets/compression.js",
+  "assets/zip.js",
+  "assets/styles.css",
+  "assets/ffmpeg-worker.js",
+  "assets/hardware-worker.js",
+];
+
+const REFERENCIA_DE_VERSAO = new URL("./app.js", import.meta.url);
+let versaoEmUso = null;
+let temAtualizacao = false;
+
+async function dataDePublicacao(cache) {
+  const resposta = await fetch(REFERENCIA_DE_VERSAO, { method: "HEAD", cache });
+  const cabecalho = resposta.headers.get("last-modified");
+  return cabecalho ? new Date(cabecalho) : null;
+}
+
+function formatarData(data) {
+  return data.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+async function mostrarVersao() {
+  try {
+    // "default" = a mesma copia que o navegador esta usando agora
+    versaoEmUso = await dataDePublicacao("default");
+    el.versao.textContent = versaoEmUso
+      ? `Versão de ${formatarData(versaoEmUso)}`
+      : "Versão instalada neste navegador";
+  } catch {
+    el.versao.textContent = "";
+    el.verificarAtualizacao.hidden = true;
+  }
+}
+
+async function verificarAtualizacao() {
+  el.verificarAtualizacao.disabled = true;
+  const rotulo = el.verificarAtualizacao.textContent;
+  el.verificarAtualizacao.textContent = "Verificando…";
+  try {
+    const publicada = await dataDePublicacao("no-store");
+    if (publicada && versaoEmUso && publicada.getTime() > versaoEmUso.getTime()) {
+      el.versao.textContent = `Há uma versão mais nova (de ${formatarData(publicada)}).`;
+      el.versao.classList.add("rodape__versao--nova");
+      el.verificarAtualizacao.textContent = "Atualizar agora";
+      el.verificarAtualizacao.disabled = false;
+      temAtualizacao = true;
+      return;
+    }
+    el.verificarAtualizacao.textContent = "Já está na versão mais recente";
+    setTimeout(() => {
+      el.verificarAtualizacao.textContent = rotulo;
+      el.verificarAtualizacao.disabled = false;
+    }, 4000);
+  } catch {
+    el.verificarAtualizacao.textContent = "Não consegui verificar agora";
+    setTimeout(() => {
+      el.verificarAtualizacao.textContent = rotulo;
+      el.verificarAtualizacao.disabled = false;
+    }, 4000);
+  }
+}
+
+/** Busca os arquivos novos, ignorando o que o navegador tem guardado. */
+async function atualizarAgora() {
+  el.verificarAtualizacao.disabled = true;
+  el.verificarAtualizacao.textContent = "Atualizando…";
+  await Promise.all(
+    ARQUIVOS_DO_APP.map((caminho) =>
+      fetch(new URL(caminho, document.baseURI), { cache: "reload" }).catch(() => null),
+    ),
+  );
+  location.reload();
+}
+
+// ---------------------------------------------------------------------------
 // Inicializacao
 // ---------------------------------------------------------------------------
 function ligarUpload() {
@@ -1207,6 +1300,9 @@ function verificarNavegador() {
 el.comprimir.addEventListener("click", comprimirTudo);
 el.baixarTudo.addEventListener("click", baixarTudo);
 el.limpar.addEventListener("click", limparFila);
+el.verificarAtualizacao.addEventListener("click", () =>
+  temAtualizacao ? atualizarAgora() : verificarAtualizacao(),
+);
 
 window.addEventListener("beforeunload", (evento) => {
   if (processando) {
@@ -1221,3 +1317,4 @@ sincronizar();
 ligarUpload();
 verificarNavegador();
 contarCapacidadesHardware();
+mostrarVersao();

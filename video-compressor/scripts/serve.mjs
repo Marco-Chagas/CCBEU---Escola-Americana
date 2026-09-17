@@ -61,6 +61,8 @@ createServer((req, res) => {
   const cabecalhos = {
     "content-type": TIPOS[extname(destino)] || "application/octet-stream",
     "cache-control": "no-cache",
+    // o app usa esta data para mostrar a versao publicada
+    "last-modified": statSync(destino).mtime.toUTCString(),
   };
   if (isolar) {
     cabecalhos["cross-origin-opener-policy"] = "same-origin";

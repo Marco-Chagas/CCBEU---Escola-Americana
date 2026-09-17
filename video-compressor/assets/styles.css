@@ -280,6 +280,19 @@ select:focus-visible, input:focus-visible, button:focus-visible {
 }
 
 /* ---------- rodape ---------- */
+.rodape__versao { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.ligacao {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--destaque);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ligacao:disabled { color: var(--texto-suave); cursor: default; text-decoration: none; }
+.rodape__versao--nova { color: var(--sucesso); font-weight: 600; }
+
 .rodape {
   max-width: 960px;
   margin: 28px auto 0;

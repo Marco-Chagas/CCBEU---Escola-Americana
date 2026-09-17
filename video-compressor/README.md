@@ -149,6 +149,15 @@ arquivos.
 Qualquer outra hospedagem de arquivos estáticos também serve (Netlify, Vercel,
 S3, servidor interno): é só publicar o conteúdo de `video-compressor/`.
 
+### Versão publicada
+
+O rodapé mostra a data de publicação da versão que está aberta e traz um botão
+**Verificar atualização**. Em vez de um número de versão escrito à mão, o app lê
+o cabeçalho `Last-Modified` do próprio `assets/app.js`: compara a cópia em uso
+com a publicada e, havendo diferença, oferece **Atualizar agora**, que rebaixa os
+arquivos ignorando o cache e recarrega. Ou seja, quem instalou o app nunca
+precisa reinstalar.
+
 ### Instalar como aplicativo
 
 O `manifest.webmanifest` deixa o app instalável. No Chrome ou Edge, o menu
