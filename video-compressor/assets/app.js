@@ -60,6 +60,7 @@ const el = {
 
 const CHAVE_OPCOES = "compressor-video:opcoes";
 const CHAVE_TURBO = "compressor-video:turbo";
+const CHAVE_AVISO_TURBO = "compressor-video:aviso-turbo";
 const AVISO_TAMANHO = 500 * 1024 * 1024;
 
 const opcoes = sanear({ ...DEFAULT_OPTIONS, ...lerOpcoesSalvas() });
@@ -159,6 +160,12 @@ function garantirMotor() {
       })
       .catch((erro) => {
         motorCarregando = null;
+        if (usandoTurbo()) {
+          // O turbo e um acelerador, nao uma dependencia: se ele falhar,
+          // desligamos e voltamos ao modo normal em vez de travar o app.
+          desistirDoTurbo(erro.message);
+          return;
+        }
         definirMotor("erro", erro.message);
         throw erro;
       });
@@ -348,54 +355,116 @@ function sincronizar() {
 async function aoTrocarTurbo() {
   if (!el.turbo.checked) {
     guardar(CHAVE_TURBO, "0");
+    guardar(CHAVE_AVISO_TURBO, "");
     if (motorPronto || motorCarregando) {
       reiniciarMotor("Modo turbo desligado.");
       definirMotor("ocioso", "Modo turbo desligado. O motor será recarregado na próxima compressão.");
     }
+    el.dicaTurbo.textContent = "Desligado. A compressão usa um núcleo só e o H.265 fica indisponível.";
     sincronizar();
+    return;
+  }
+
+  if (self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined") {
+    guardar(CHAVE_TURBO, "1");
+    reiniciarMotor("Modo turbo ligado.");
+    definirMotor("ocioso", "Modo turbo ligado (H.265 liberado). O motor será recarregado na próxima compressão.");
+    el.dicaTurbo.textContent = `Ligado: a compressão usa até ${navigator.hardwareConcurrency || 4} núcleos do seu processador e libera a saída em H.265.`;
+    sincronizar();
+    return;
+  }
+
+  await ligarTurbo(false);
+}
+
+/**
+ * O modo turbo se liga sozinho na primeira visita. Se o navegador nao aceitar,
+ * desiste em silencio e nunca mais tenta — a compressao funciona do mesmo
+ * jeito, so mais devagar.
+ */
+function prepararTurbo() {
+  const aviso = ler(CHAVE_AVISO_TURBO);
+  if (aviso) guardar(CHAVE_AVISO_TURBO, "");
+
+  const escolha = ler(CHAVE_TURBO); // "1", "0" ou vazio na primeira visita
+  const isolado = Boolean(self.crossOriginIsolated) && typeof SharedArrayBuffer !== "undefined";
+
+  if (isolado) {
+    el.turbo.checked = escolha !== "0";
+    el.dicaTurbo.textContent = `Ligado: a compressão usa até ${navigator.hardwareConcurrency || 4} núcleos do seu processador e libera a saída em H.265.`;
+    return;
+  }
+
+  el.turbo.checked = false;
+  if (aviso) {
+    el.dicaTurbo.textContent = aviso;
+    return;
+  }
+  if (escolha === "0") return;
+  if (escolha === "1") {
+    // tentou na visita anterior e o navegador nao aceitou
+    guardar(CHAVE_TURBO, "0");
+    el.dicaTurbo.textContent =
+      "O modo turbo não funciona neste navegador. A compressão continua normal, só um pouco mais devagar.";
+    return;
+  }
+  ligarTurbo(true);
+}
+
+/** Registra o service worker que isola a pagina e recarrega uma unica vez. */
+async function ligarTurbo(automatico) {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) {
+    guardar(CHAVE_TURBO, "0");
+    el.turbo.checked = false;
+    el.dicaTurbo.textContent =
+      "O modo turbo não está disponível aqui (precisa de HTTPS). A compressão continua funcionando normalmente.";
     return;
   }
 
   guardar(CHAVE_TURBO, "1");
-  if (self.crossOriginIsolated && typeof SharedArrayBuffer !== "undefined") {
-    reiniciarMotor("Modo turbo ligado.");
-    definirMotor("ocioso", "Modo turbo ligado (H.265 liberado). O motor será recarregado na próxima compressão.");
-    sincronizar();
-    return;
-  }
-
-  if (!("serviceWorker" in navigator) || !window.isSecureContext) {
-    el.turbo.checked = false;
-    el.dicaTurbo.textContent =
-      "O modo turbo não está disponível aqui (precisa de HTTPS e de service worker). A compressão continua funcionando normalmente.";
-    sincronizar();
-    return;
-  }
+  el.dicaTurbo.textContent = "Ativando o modo turbo… a página vai recarregar uma vez.";
+  if (automatico) definirMotor("carregando", "Preparando o modo turbo…");
 
   try {
-    el.dicaTurbo.textContent = "Ativando o modo turbo… a página vai recarregar.";
-    const registro = await navigator.serviceWorker.register(new URL("../coi-serviceworker.js", import.meta.url), {
-      scope: "./",
-    });
-    await registro.update().catch(() => {});
+    await navigator.serviceWorker.register(new URL("../coi-serviceworker.js", import.meta.url), { scope: "./" });
+    // esperamos o service worker ficar ativo: recarregar antes disso
+    // devolveria a mesma pagina sem isolamento
+    await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((resolve) => setTimeout(resolve, 8000)),
+    ]);
+    if (automatico && fila.length) {
+      // A pessoa ja comecou a usar o app: recarregar agora apagaria a fila.
+      // Deixamos a escolha em aberto para tentar de novo na proxima visita.
+      guardar(CHAVE_TURBO, "");
+      el.dicaTurbo.textContent = "O modo turbo será ligado na próxima vez que você abrir o app.";
+      definirMotor("ocioso", "Motor de compressão pronto para carregar");
+      return;
+    }
     location.reload();
   } catch (erro) {
+    guardar(CHAVE_TURBO, "0");
     el.turbo.checked = false;
     el.dicaTurbo.textContent = `Não foi possível ativar o modo turbo (${erro.message}). A compressão continua funcionando normalmente.`;
   }
 }
 
-function prepararTurbo() {
-  const querTurbo = ler(CHAVE_TURBO) === "1";
-  const isolado = Boolean(self.crossOriginIsolated) && typeof SharedArrayBuffer !== "undefined";
-  el.turbo.checked = querTurbo && isolado;
-  if (isolado) {
-    el.dicaTurbo.textContent = `Modo turbo disponível: usa até ${navigator.hardwareConcurrency || 4} núcleos do seu processador.`;
-  } else if (querTurbo) {
-    el.dicaTurbo.textContent =
-      "O modo turbo não pôde ser ativado neste endereço. A compressão funciona normalmente, só um pouco mais devagar.";
-    guardar(CHAVE_TURBO, "0");
+/** Desliga o turbo, tira o service worker do caminho e recarrega. */
+async function desistirDoTurbo(motivo) {
+  guardar(CHAVE_TURBO, "0");
+  guardar(
+    CHAVE_AVISO_TURBO,
+    "O modo turbo não funcionou neste navegador, então voltamos ao modo normal. Pode usar o app à vontade.",
+  );
+  registrar(`Turbo desligado: ${motivo}`);
+  definirMotor("carregando", "Voltando ao modo normal…");
+  try {
+    const registros = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registros.map((registro) => registro.unregister()));
+  } catch {
+    /* seguimos mesmo assim */
   }
+  location.reload();
 }
 
 // ---------------------------------------------------------------------------

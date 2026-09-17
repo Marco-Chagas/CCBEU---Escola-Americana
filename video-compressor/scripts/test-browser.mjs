@@ -77,7 +77,13 @@ try {
 
   console.log("\nAbrindo o app…");
   await pagina.goto(`http://localhost:${PORTA}/?core=/vendor/core`, { waitUntil: "load" });
+  // Na primeira visita o app liga o modo turbo sozinho e recarrega uma vez.
+  await pagina
+    .waitForFunction(() => self.crossOriginIsolated === true, null, { timeout: 20000 })
+    .catch(() => {});
+  await pagina.waitForLoadState("load");
   check("Pagina abriu", (await pagina.title()).includes("Compressor"));
+  check("Modo turbo ligou sozinho", await pagina.evaluate(() => self.crossOriginIsolated === true));
 
   // 3. upload ----------------------------------------------------------------
   await pagina.setInputFiles("#arquivos", entradas.map((e) => e.caminho));

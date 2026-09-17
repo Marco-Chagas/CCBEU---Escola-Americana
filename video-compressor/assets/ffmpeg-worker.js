@@ -24,8 +24,11 @@ function coreBaseUrl(base, multithread) {
     const limpo = base.replace(/\/+$/, "");
     return multithread ? `${limpo}-mt` : limpo;
   }
-  const pkg = multithread ? "@ffmpeg/core-mt" : "@ffmpeg/core";
-  return `https://cdn.jsdelivr.net/npm/${pkg}@${CORE_VERSION}/dist/umd`;
+  // O nucleo multi-thread vem do proprio site: no modo turbo a pagina fica
+  // isolada (COOP/COEP) e o navegador passa a barrar arquivos de outros
+  // dominios. O de thread unica pode vir do CDN, que e mais leve de manter.
+  if (multithread) return new URL("../vendor/ffmpeg-core-mt", self.location.href).href;
+  return `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/umd`;
 }
 
 async function openCache() {

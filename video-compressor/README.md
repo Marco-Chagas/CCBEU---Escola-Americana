@@ -53,11 +53,22 @@ o motor — por isso o app o reinicia e tenta de novo automaticamente.
 
 ### Modo turbo
 
-O ffmpeg multi-thread precisa que a página seja "isolada"
-(cabeçalhos `COOP`/`COEP`). Como o GitHub Pages não permite configurar cabeçalhos,
-o app registra um *service worker* que os adiciona — é isso que o botão **Modo turbo**
-faz. Ele deixa a compressão várias vezes mais rápida e libera o H.265, mas é
-opcional: sem ele tudo continua funcionando, só mais devagar.
+O ffmpeg multi-thread precisa que a página seja "isolada" (cabeçalhos
+`COOP`/`COEP`). Como o GitHub Pages e a maioria das hospedagens estáticas não
+deixam configurar cabeçalhos, o app registra um *service worker* que os
+adiciona — e faz isso **sozinho na primeira visita**, recarregando a página uma
+única vez. Depois disso a compressão usa todos os núcleos do processador (3 a 4
+vezes mais rápida nos testes) e o H.265 fica disponível.
+
+Se o navegador não aceitar, o app desiste em silêncio, avisa na tela e continua
+funcionando no modo normal — o turbo é um acelerador, nunca uma dependência. O
+mesmo vale se o motor falhar com ele ligado: o app desliga o turbo, tira o
+service worker do caminho e recarrega no modo normal.
+
+Por isso o núcleo multi-thread mora em `vendor/ffmpeg-core-mt/` em vez de vir do
+CDN: com a página isolada, o navegador fica muito mais rigoroso com arquivos de
+outros domínios, e servir do mesmo endereço faz o turbo funcionar em qualquer
+hospedagem — inclusive em rede fechada.
 
 ### Limites
 
@@ -135,6 +146,7 @@ caminho com o sufixo `-mt` (`/caminho/para/o/nucleo-mt`).
 | `coi-serviceworker.js` | cabeçalhos do modo turbo |
 | `manifest.webmanifest` | permite instalar o app na área de trabalho |
 | `assets/icones/` | ícones do app (SVG de origem e PNGs gerados) |
+| `vendor/ffmpeg-core-mt/` | núcleo multi-thread do ffmpeg, servido pelo próprio site |
 | `scripts/` | servidor local e testes automatizados |
 
 > O ffmpeg é distribuído sob licença GPL/LGPL. Este app apenas o carrega no
