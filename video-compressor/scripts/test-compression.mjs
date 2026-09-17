@@ -8,7 +8,7 @@
  *   cd video-compressor && npm install && npm test
  */
 import { loadCore } from "./core-node.mjs";
-import { buildFfmpegArgs, CODECS, outputFileName } from "../assets/compression.js";
+import { buildFfmpegArgs, buildHardwareJob, CODECS, outputFileName } from "../assets/compression.js";
 
 const results = [];
 let failures = 0;
@@ -271,6 +271,60 @@ console.log("\n5) Compressao realmente reduz o tamanho");
     compressed < original,
     `${(original / 1024).toFixed(0)} KB → ${(compressed / 1024).toFixed(0)} KB ` +
       `(-${Math.round((1 - compressed / original) * 100)}%)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+console.log("\n6) Traducao das opcoes para o motor de hardware");
+{
+  const fonte = { name: "aula.mp4", duration: 60, width: 1920, height: 1080, fps: 30, hasAudio: true };
+  const bitrate = (opcoes) => buildHardwareJob(opcoes, fonte).videoBitrate;
+
+  check(
+    "Bitrate cai conforme o nivel aperta",
+    bitrate({ level: "leve" }) > bitrate({ level: "equilibrado" }) &&
+      bitrate({ level: "equilibrado" }) > bitrate({ level: "forte" }) &&
+      bitrate({ level: "forte" }) > bitrate({ level: "extrema" }),
+    ["leve", "equilibrado", "forte", "extrema"]
+      .map((nivel) => `${nivel}: ${(bitrate({ level: nivel }) / 1e6).toFixed(1)} Mbps`)
+      .join(", "),
+  );
+
+  check(
+    "Resolucao menor pede menos bitrate",
+    bitrate({ maxHeight: 720 }) < bitrate({ maxHeight: 1080 }),
+    `1080p: ${(bitrate({ maxHeight: 1080 }) / 1e6).toFixed(1)} Mbps, 720p: ${(bitrate({ maxHeight: 720 }) / 1e6).toFixed(1)} Mbps`,
+  );
+
+  check(
+    "H.265 pede menos bitrate que H.264 no mesmo nivel",
+    bitrate({ codec: "h265" }) < bitrate({ codec: "h264" }),
+    `H.264: ${(bitrate({ codec: "h264" }) / 1e6).toFixed(1)} Mbps, H.265: ${(bitrate({ codec: "h265" }) / 1e6).toFixed(1)} Mbps`,
+  );
+
+  const alvo = buildHardwareJob({ mode: "size", targetSizeMB: 30, audioBitrate: 128 }, fonte);
+  const previsto = ((alvo.videoBitrate + alvo.audioBitrate) * 60) / 8 / 1024 / 1024;
+  check(
+    "Modo tamanho alvo vira bitrate coerente",
+    previsto > 28 && previsto < 31,
+    `alvo 30 MB → ${previsto.toFixed(1)} MB previstos`,
+  );
+
+  const pequeno = buildHardwareJob({ maxHeight: 1080 }, { ...fonte, width: 640, height: 360 });
+  check(
+    "Nunca aumenta a resolucao",
+    pequeno.altura === 360 && pequeno.largura === 640,
+    `${pequeno.largura}x${pequeno.altura}`,
+  );
+
+  const semAudio = buildHardwareJob({ audioBitrate: 0 }, fonte);
+  check("Remover o audio chega ao motor de hardware", semAudio.manterAudio === false && semAudio.audioBitrate === 0);
+
+  const webm = buildHardwareJob({ codec: "vp8" }, fonte);
+  check(
+    "WebM usa Opus e container certo",
+    webm.container === "webm" && webm.audioCodec === "opus" && webm.videoCodec === "vp8",
+    `${webm.container} / ${webm.videoCodec} / ${webm.audioCodec}`,
   );
 }
 

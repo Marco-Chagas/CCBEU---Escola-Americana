@@ -9,11 +9,13 @@ import {
   AUDIO_MODES,
   CODECS,
   DEFAULT_OPTIONS,
+  ENGINES,
   FRAME_RATES,
   QUALITY_LEVELS,
   RESOLUTIONS,
   SPEEDS,
   buildFfmpegArgs,
+  buildHardwareJob,
   formatBytes,
   formatDuration,
   outputFileName,
@@ -45,6 +47,8 @@ const el = {
   audio: $("audio"),
   velocidade: $("velocidade"),
   dicaVelocidade: $("dicaVelocidade"),
+  motorCompressao: $("motorCompressao"),
+  dicaMotorCompressao: $("dicaMotorCompressao"),
   turbo: $("turbo"),
   dicaTurbo: $("dicaTurbo"),
   resumo: $("resumo"),
@@ -196,6 +200,99 @@ function mostrarDownloadNucleo({ label, loaded, total, cached }) {
 }
 
 // ---------------------------------------------------------------------------
+// Motor de hardware (WebCodecs)
+// ---------------------------------------------------------------------------
+let trabalhadorHardware = null;
+let capacidadesHardware = null;
+const pendentesHardware = new Map();
+
+function criarTrabalhadorHardware() {
+  trabalhadorHardware = new Worker(new URL("./hardware-worker.js", import.meta.url), { type: "module" });
+  trabalhadorHardware.onmessage = (evento) => {
+    const dados = evento.data || {};
+    const pendente = pendentesHardware.get(dados.jobId);
+    if (dados.type === "progress") {
+      if (pendente && pendente.onProgress) pendente.onProgress(dados);
+      return;
+    }
+    if (!pendente) return;
+    pendentesHardware.delete(dados.jobId);
+    if (dados.type === "error") {
+      pendente.reject(Object.assign(new Error(dados.message), { incompativel: dados.incompativel }));
+    } else {
+      pendente.resolve(dados);
+    }
+  };
+  trabalhadorHardware.onerror = (evento) => {
+    const erro = new Error(evento.message || "Falha no motor de hardware.");
+    for (const [, pendente] of pendentesHardware) pendente.reject(erro);
+    pendentesHardware.clear();
+  };
+  return trabalhadorHardware;
+}
+
+function enviarHardware(mensagem, onProgress = null) {
+  if (!trabalhadorHardware) criarTrabalhadorHardware();
+  const jobId = `hw-${(proximoJob += 1)}`;
+  return new Promise((resolve, reject) => {
+    pendentesHardware.set(jobId, { resolve, reject, onProgress });
+    trabalhadorHardware.postMessage({ ...mensagem, jobId });
+  });
+}
+
+function reiniciarHardware() {
+  if (trabalhadorHardware) trabalhadorHardware.terminate();
+  trabalhadorHardware = null;
+  pendentesHardware.clear();
+}
+
+/** Descobre uma vez o que este navegador consegue fazer por hardware. */
+async function verCapacidadesHardware() {
+  if (capacidadesHardware) return capacidadesHardware;
+  if (typeof VideoEncoder === "undefined") {
+    capacidadesHardware = { disponivel: false, motivo: "Este navegador não tem aceleração por hardware (WebCodecs)." };
+    return capacidadesHardware;
+  }
+  try {
+    capacidadesHardware = await enviarHardware({ type: "capacidades" });
+  } catch (erro) {
+    capacidadesHardware = { disponivel: false, motivo: erro.message };
+  }
+  return capacidadesHardware;
+}
+
+/** Texto da dica do motor, ja considerando o que este navegador oferece. */
+function atualizarDicaMotor() {
+  const base = (ENGINES.find((e) => e.value === opcoes.engine) || ENGINES[0]).hint;
+  if (opcoes.engine === "ffmpeg" || !capacidadesHardware) {
+    el.dicaMotorCompressao.textContent = base;
+    return;
+  }
+  if (!capacidadesHardware.disponivel) {
+    el.dicaMotorCompressao.textContent = `${base} Neste navegador a aceleração por hardware não está disponível, então tudo usa o motor completo.`;
+    return;
+  }
+  const formatos = Object.entries({ h264: "H.264", h265: "H.265", vp8: "VP8" })
+    .filter(([id]) => capacidadesHardware.video[id])
+    .map(([, nome]) => nome)
+    .join(", ");
+  el.dicaMotorCompressao.textContent = `Aceleração por hardware disponível neste navegador (${formatos}). Arquivos que ela não aceita usam o motor completo automaticamente.`;
+}
+
+/** Descobre o que o hardware oferece e atualiza a interface. */
+async function contarCapacidadesHardware() {
+  await verCapacidadesHardware();
+  sincronizar(); // a lista de codecs e a dica dependem do que o hardware aceita
+}
+
+/** O motor de hardware serve para este arquivo com estas opções? */
+function hardwarePodeAtender(capacidades) {
+  if (opcoes.engine === "ffmpeg") return false;
+  if (!capacidades || !capacidades.disponivel) return false;
+  return Boolean(capacidades.video && capacidades.video[opcoes.codec]);
+}
+
+// ---------------------------------------------------------------------------
 // Controles
 // ---------------------------------------------------------------------------
 function preencherSelect(select, itens, valorAtual) {
@@ -210,14 +307,31 @@ function preencherSelect(select, itens, valorAtual) {
   select.value = String(valorAtual);
 }
 
-/** Alguns codecs (H.265) so funcionam com o modo turbo ligado. */
+/**
+ * O H.265 pede thread multipla no ffmpeg (modo turbo), mas o motor de hardware
+ * o codifica sem essa exigencia. Um dos dois caminhos basta para liberar a opcao.
+ */
+function codecDisponivel(codec) {
+  if (!codec.requiresMultithread) return true;
+  if (usandoTurbo()) return true;
+  return Boolean(
+    opcoes.engine !== "ffmpeg" &&
+      capacidadesHardware &&
+      capacidadesHardware.disponivel &&
+      capacidadesHardware.video &&
+      capacidadesHardware.video[codec.id],
+  );
+}
+
 function opcoesDeCodec() {
-  const turbo = usandoTurbo();
-  return Object.values(CODECS).map((codec) => ({
-    value: codec.id,
-    label: codec.requiresMultithread && !turbo ? `${codec.label} — só com o modo turbo` : codec.label,
-    disabled: Boolean(codec.requiresMultithread) && !turbo,
-  }));
+  return Object.values(CODECS).map((codec) => {
+    const disponivel = codecDisponivel(codec);
+    return {
+      value: codec.id,
+      label: disponivel ? codec.label : `${codec.label} — só com o modo turbo`,
+      disabled: !disponivel,
+    };
+  });
 }
 
 function montarControles() {
@@ -243,6 +357,7 @@ function montarControles() {
     Object.values(SPEEDS).map((s) => ({ value: s.id, label: s.label })),
     opcoes.speed,
   );
+  preencherSelect(el.motorCompressao, ENGINES, opcoes.engine);
 
   el.tamanhoAlvo.value = String(opcoes.targetSizeMB);
   const faixaInicial = CODECS[opcoes.codec].crfRange;
@@ -289,6 +404,11 @@ function montarControles() {
     opcoes.speed = el.velocidade.value;
     sincronizar();
   });
+  el.motorCompressao.addEventListener("change", () => {
+    opcoes.engine = el.motorCompressao.value;
+    sincronizar();
+    contarCapacidadesHardware();
+  });
   el.crf.addEventListener("input", () => {
     opcoes.level = "custom";
     opcoes.crf = Number(el.crf.value);
@@ -314,7 +434,7 @@ function escolherNivel(id) {
 }
 
 function sincronizar() {
-  if (CODECS[opcoes.codec].requiresMultithread && !usandoTurbo()) {
+  if (!codecDisponivel(CODECS[opcoes.codec])) {
     opcoes.codec = DEFAULT_OPTIONS.codec;
   }
   preencherSelect(el.codec, opcoesDeCodec(), opcoes.codec);
@@ -336,6 +456,7 @@ function sincronizar() {
 
   el.dicaCodec.textContent = CODECS[opcoes.codec].hint;
   el.dicaVelocidade.textContent = SPEEDS[opcoes.speed].hint;
+  atualizarDicaMotor();
 
   const partes = [CODECS[opcoes.codec].label];
   partes.push(porTamanho ? `alvo de ~${opcoes.targetSizeMB} MB por vídeo` : `qualidade ${QUALITY_LEVELS[opcoes.level].label} (CRF ${opcoes.crf})`);
@@ -614,7 +735,82 @@ function extensao(nome) {
   return ponto > 0 ? nome.slice(ponto).toLowerCase() : ".bin";
 }
 
+/**
+ * Tenta primeiro o motor de hardware (rápido) e cai para o ffmpeg.wasm
+ * (completo) quando ele não dá conta do arquivo ou falha.
+ */
 async function comprimirItem(item) {
+  const capacidades = await verCapacidadesHardware();
+  if (hardwarePodeAtender(capacidades)) {
+    try {
+      await comprimirComHardware(item);
+      return;
+    } catch (erro) {
+      if (pararPedido) throw erro;
+      registrar(
+        `${item.file.name}: ${
+          erro.incompativel ? "o motor de hardware não aceita este arquivo" : `falha no motor de hardware (${erro.message})`
+        }; usando o motor completo.`,
+      );
+      reiniciarHardware();
+      definirEstado(item, "processando", "Passando para o motor completo…");
+    }
+  }
+  await comprimirComFfmpeg(item);
+}
+
+async function comprimirComHardware(item) {
+  const inicio = performance.now();
+  let ultimoDesenho = 0;
+  definirProgresso(item, 0);
+  definirEstado(item, "processando", "Analisando o vídeo…");
+
+  const analise = await enviarHardware({ type: "analisar", file: item.file });
+  item.meta = { ...item.meta, ...analise.meta };
+  atualizarMeta(item);
+  if (!analise.meta.decodifica) {
+    throw Object.assign(new Error("O navegador não sabe decodificar este vídeo."), { incompativel: true });
+  }
+
+  const job = buildHardwareJob(opcoes, { name: item.file.name, size: item.file.size, ...item.meta });
+  if (!job) throw Object.assign(new Error("Codec sem equivalente por hardware."), { incompativel: true });
+  if (job.manterAudio && capacidadesHardware.audio && !capacidadesHardware.audio[job.audioCodec]) {
+    throw Object.assign(new Error(`O navegador não codifica áudio ${job.audioCodec}.`), { incompativel: true });
+  }
+  registrar(`hardware: ${job.summary}`);
+
+  definirEstado(item, "processando", "Comprimindo com aceleração por hardware…");
+  const resposta = await enviarHardware({ type: "run", file: item.file, job }, ({ ratio }) => {
+    const agora = performance.now();
+    if (agora - ultimoDesenho < 120) return;
+    ultimoDesenho = agora;
+    definirProgresso(item, ratio);
+    const decorrido = (performance.now() - inicio) / 1000;
+    const restante = ratio > 0.02 ? decorrido / ratio - decorrido : 0;
+    definirEstado(
+      item,
+      "processando",
+      `Comprimindo (hardware)… ${Math.round(Math.min(1, ratio) * 100)}%${
+        restante > 1 ? ` • faltam cerca de ${formatDuration(restante)}` : ""
+      }`,
+    );
+  });
+
+  const blob = new Blob([resposta.data], { type: job.mime });
+  item.resultado = {
+    blob,
+    url: URL.createObjectURL(blob),
+    nome: job.outputName,
+    tamanho: blob.size,
+    resumo: job.summary,
+    motor: "hardware",
+    segundos: (performance.now() - inicio) / 1000,
+  };
+  definirProgresso(item, 1);
+  mostrarResultado(item);
+}
+
+async function comprimirComFfmpeg(item) {
   const inicio = performance.now();
   let ultimoDesenho = 0;
   definirProgresso(item, 0);
@@ -669,6 +865,7 @@ async function comprimirItem(item) {
     nome: outputName,
     tamanho: blob.size,
     resumo: job.summary,
+    motor: "completo",
     segundos: (performance.now() - inicio) / 1000,
   };
   definirProgresso(item, 1);
@@ -682,7 +879,9 @@ function mostrarResultado(item) {
   definirEstado(
     item,
     "pronto",
-    `Pronto em ${formatDuration(resultado.segundos)} — ${formatBytes(item.file.size)} → ${formatBytes(resultado.tamanho)}`,
+    `Pronto em ${formatDuration(resultado.segundos)} ${
+      resultado.motor === "hardware" ? "(hardware)" : "(motor completo)"
+    } — ${formatBytes(item.file.size)} → ${formatBytes(resultado.tamanho)}`,
   );
   const rotulo = ganho >= 0 ? `−${Math.round(ganho * 100)}%` : `+${Math.round(-ganho * 100)}%`;
   const marcador = document.createElement("span");
@@ -759,7 +958,8 @@ async function comprimirComRetentativa(item) {
 async function comprimirTudo() {
   if (processando) {
     pararPedido = true;
-    reiniciarMotor();
+    reiniciarMotor("Compressão interrompida.");
+    reiniciarHardware();
     return;
   }
 
@@ -770,12 +970,16 @@ async function comprimirTudo() {
   pararPedido = false;
   atualizarBotoes();
 
-  try {
-    await garantirMotor();
-  } catch {
-    processando = false;
-    atualizarBotoes();
-    return;
+  const capacidades = await verCapacidadesHardware();
+  if (!hardwarePodeAtender(capacidades)) {
+    // sem hardware, tudo passa pelo ffmpeg.wasm: vale carregar o motor antes
+    try {
+      await garantirMotor();
+    } catch {
+      processando = false;
+      atualizarBotoes();
+      return;
+    }
   }
 
   for (const item of pendentesFila) {
@@ -933,6 +1137,7 @@ function sanear(valores) {
   if (!CODECS[limpo.codec]) limpo.codec = DEFAULT_OPTIONS.codec;
   if (!QUALITY_LEVELS[limpo.level]) limpo.level = DEFAULT_OPTIONS.level;
   if (!SPEEDS[limpo.speed]) limpo.speed = DEFAULT_OPTIONS.speed;
+  if (!ENGINES.some((motor) => motor.value === limpo.engine)) limpo.engine = DEFAULT_OPTIONS.engine;
   if (limpo.mode !== "size") limpo.mode = "quality";
   return limpo;
 }
@@ -1015,3 +1220,4 @@ montarControles();
 sincronizar();
 ligarUpload();
 verificarNavegador();
+contarCapacidadesHardware();

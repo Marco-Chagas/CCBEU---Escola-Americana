@@ -32,8 +32,32 @@ Abra a página publicada (veja *Publicação* abaixo) e:
 2. **Escolha o tipo de compressão** no passo 2.
 3. Clique em **Comprimir tudo** e depois em **Baixar**.
 
-Na primeira vez o app baixa o motor de compressão (~32 MB). Ele fica guardado no
-cache do navegador, então as próximas vezes começam na hora.
+Quando o vídeo é acelerado por hardware, não há nada para baixar. Se o arquivo
+precisar do motor completo, aí sim ele baixa ~32 MB na primeira vez — depois
+fica guardado no cache do navegador.
+
+### Os dois motores
+
+O app tem dois motores e escolhe sozinho, arquivo por arquivo:
+
+| | **Hardware (WebCodecs)** | **Completo (ffmpeg.wasm)** |
+| --- | --- | --- |
+| Velocidade | usa o codificador de vídeo do próprio computador — muito mais rápido | software puro; o modo turbo ajuda, mas ainda é lento |
+| Formatos de entrada | MP4, MOV, WebM, MKV | praticamente tudo (AVI, WMV, FLV, MPEG-TS, ProRes…) |
+| Qualidade | por bitrate (o codificador do hardware não aceita CRF) | CRF exato |
+| Quando roda | quando o navegador tem WebCodecs, sabe decodificar o vídeo e codificar o formato escolhido | em todos os outros casos |
+
+A regra é simples: **tenta o hardware; se ele não aceitar o arquivo ou falhar no
+meio, o mesmo vídeo vai para o motor completo automaticamente**, sem o usuário
+precisar fazer nada. O cartão de cada vídeo mostra qual motor foi usado, e o
+seletor *Motor de compressão* permite forçar o completo (útil quando se quer o
+CRF exato).
+
+Como o hardware trabalha por bitrate, os níveis de qualidade são convertidos
+para bitrate em `buildHardwareJob()` (regra: cada 6 pontos de CRF dobram ou
+reduzem o bitrate pela metade, ajustado pela eficiência do codec) — a mesma
+conta que o x264 usa na prática. Por isso o tamanho final pode variar um pouco
+entre os dois motores.
 
 ### Sobre os codecs
 
@@ -44,7 +68,7 @@ O que está na interface foi testado no Chromium e no Node com o mesmo binário:
 | --- | --- |
 | **MP4 / H.264** | funciona sempre — é o padrão |
 | **WebM / VP8** | funciona sempre |
-| **MP4 / H.265 (HEVC)** | só com o **modo turbo**; sem multi-thread o x265 trava ao criar o *thread pool*, então o app troca automaticamente por H.264 e avisa |
+| **MP4 / H.265 (HEVC)** | pelo hardware, sempre que o navegador souber codificá-lo; pelo ffmpeg, só com o **modo turbo** (sem multi-thread o x265 trava ao criar o *thread pool*, e o app troca por H.264 avisando) |
 | ~~WebM / VP9~~ | fora da lista: estoura a memória do WebAssembly e derruba a aba |
 
 Duas armadilhas encontradas nos testes e já contornadas no código: `-ac 2` junto
@@ -102,8 +126,14 @@ npm run test:browser # abre o app no Chromium, envia, comprime e baixa
 
 O `npm test` gera vídeos de teste com o próprio ffmpeg, roda **os mesmos argumentos
 que a interface monta** e valida cada saída com o `ffprobe`: codec, resolução,
-duração, presença de áudio, ordem dos níveis de compressão e precisão do modo
-"tamanho alvo".
+duração, presença de áudio, ordem dos níveis de compressão, precisão do modo
+"tamanho alvo" e a tradução das opções para o motor de hardware — 35 verificações.
+
+O `npm run test:browser` exercita o app inteiro no Chromium, nos dois motores.
+Uma limitação do ambiente de teste: o Chromium do Playwright não traz os codecs
+proprietários (H.264, HEVC, AAC), então o motor de hardware é testado com
+VP8/Opus. No Chrome ou no Edge do usuário, o mesmo código roda com H.264
+acelerado por hardware.
 
 ## Publicação
 
@@ -140,13 +170,15 @@ caminho com o sufixo `-mt` (`/caminho/para/o/nucleo-mt`).
 | `index.html` | estrutura da página |
 | `assets/styles.css` | aparência (tema claro e escuro) |
 | `assets/app.js` | interface, fila de arquivos, progresso e downloads |
-| `assets/compression.js` | **regras de compressão** — transforma as opções em argumentos do ffmpeg |
+| `assets/compression.js` | **regras de compressão** — transforma as opções em argumentos do ffmpeg e em opções do hardware |
+| `assets/hardware-worker.js` | motor de hardware (WebCodecs, via mediabunny) |
 | `assets/ffmpeg-worker.js` | carrega o ffmpeg.wasm e executa as conversões fora da thread principal |
 | `assets/zip.js` | gera o `.zip` do "baixar tudo" |
 | `coi-serviceworker.js` | cabeçalhos do modo turbo |
 | `manifest.webmanifest` | permite instalar o app na área de trabalho |
 | `assets/icones/` | ícones do app (SVG de origem e PNGs gerados) |
 | `vendor/ffmpeg-core-mt/` | núcleo multi-thread do ffmpeg, servido pelo próprio site |
+| `vendor/mediabunny/` | biblioteca que lê e escreve mídia usando WebCodecs |
 | `scripts/` | servidor local e testes automatizados |
 
 > O ffmpeg é distribuído sob licença GPL/LGPL. Este app apenas o carrega no

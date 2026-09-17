@@ -151,6 +151,92 @@ try {
   );
 
   check("Nenhum erro de JavaScript na pagina", errosConsole.length === 0, errosConsole.join(" | "));
+
+  // 8. motor de hardware (WebCodecs) ----------------------------------------
+  // O Chromium de testes nao traz H.264/AAC (codecs proprietarios), entao o
+  // caminho de hardware e exercitado com VP8/Opus, que ele suporta. Em um
+  // Chrome ou Edge normal, o mesmo codigo roda com H.264 acelerado.
+  console.log("\nMotor de hardware (WebCodecs)…");
+  const origemWebm = join(pasta, "gravacao.webm");
+  {
+    const code = ff.exec(
+      "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30",
+      "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+      "-t", "3", "-c:v", "libvpx", "-b:v", "1500k", "-cpu-used", "8",
+      "-c:a", "libopus", "-b:a", "96k", "-shortest", "-y", "gravacao.webm",
+    );
+    if (code !== 0) throw new Error("falha ao gerar o webm de teste");
+    writeFileSync(origemWebm, ff.core.FS.readFile("gravacao.webm"));
+    ff.core.FS.unlink("gravacao.webm");
+  }
+
+  const paginaHw = await contexto.newPage();
+  const errosHw = [];
+  paginaHw.on("pageerror", (erro) => errosHw.push(erro.message));
+  await paginaHw.goto(`http://localhost:${PORTA}/?core=/vendor/core`, { waitUntil: "load" });
+  await paginaHw
+    .waitForFunction(() => self.crossOriginIsolated === true, null, { timeout: 20000 })
+    .catch(() => {});
+  await paginaHw.waitForLoadState("load");
+
+  const capacidades = await paginaHw.evaluate(async () => {
+    if (typeof VideoEncoder === "undefined") return null;
+    const worker = new Worker("/assets/hardware-worker.js", { type: "module" });
+    const resposta = await new Promise((resolve) => {
+      worker.onmessage = (e) => resolve(e.data);
+      worker.postMessage({ type: "capacidades", jobId: "c" });
+    });
+    worker.terminate();
+    return resposta;
+  });
+  check(
+    "Motor de hardware responde as capacidades do navegador",
+    capacidades && capacidades.disponivel,
+    capacidades ? `vídeo: ${JSON.stringify(capacidades.video)} áudio: ${JSON.stringify(capacidades.audio)}` : "sem WebCodecs",
+  );
+
+  await paginaHw.setInputFiles("#arquivos", origemWebm);
+  await paginaHw.waitForSelector(".item");
+  await paginaHw.selectOption("#codec", "vp8");
+  await paginaHw.selectOption("#resolucao", "360");
+  await paginaHw.selectOption("#motorCompressao", "auto");
+  const inicioHw = Date.now();
+  await paginaHw.click("#comprimir");
+  await paginaHw.waitForFunction(
+    () => {
+      const no = document.querySelector('.item__estado');
+      return no && (no.dataset.estado === "pronto" || no.dataset.estado === "erro");
+    },
+    null,
+    { timeout: 5 * 60 * 1000 },
+  );
+  const estadoHw = await paginaHw.locator(".item__estado").textContent();
+  check(
+    "Comprimiu usando a aceleracao por hardware",
+    estadoHw.includes("(hardware)"),
+    `${estadoHw.trim()} em ${((Date.now() - inicioHw) / 1000).toFixed(1)}s`,
+  );
+
+  const [downloadHw] = await Promise.all([
+    paginaHw.waitForEvent("download"),
+    paginaHw.locator(".item").first().getByText("Baixar", { exact: true }).click(),
+  ]);
+  const arquivoHw = join(pasta, downloadHw.suggestedFilename());
+  await downloadHw.saveAs(arquivoHw);
+  const bytesHw = readFileSync(arquivoHw);
+  ff.core.FS.writeFile("hw.webm", new Uint8Array(bytesHw));
+  const infoHw = ff.probe("hw.webm");
+  const videoHw = infoHw.streams.find((s) => s.codec_type === "video");
+  const audioHw = infoHw.streams.find((s) => s.codec_type === "audio");
+  check(
+    "Arquivo do hardware e um WebM valido, com audio e menor que o original",
+    videoHw && videoHw.codec_name === "vp8" && audioHw && bytesHw.length < readFileSync(origemWebm).length,
+    `${videoHw ? videoHw.codec_name : "?"} ${videoHw ? videoHw.width + "x" + videoHw.height : ""} + ${
+      audioHw ? audioHw.codec_name : "sem audio"
+    }, ${(readFileSync(origemWebm).length / 1024).toFixed(0)} KB → ${(bytesHw.length / 1024).toFixed(0)} KB`,
+  );
+  ff.core.FS.unlink("hw.webm");
+  check("Nenhum erro de JavaScript no motor de hardware", errosHw.length === 0, errosHw.join(" | "));
 } finally {
   await navegador.close();
   servidor.kill();
