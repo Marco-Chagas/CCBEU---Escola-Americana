@@ -1,0 +1,127 @@
+# 🎬 Compressor de Vídeo Online
+
+App para comprimir vídeos de **qualquer formato** direto no navegador: você envia os
+arquivos, escolhe o tipo de compressão e baixa o resultado. Nenhum vídeo é enviado
+para servidores — todo o processamento acontece no seu próprio computador, usando
+[ffmpeg.wasm](https://ffmpegwasm.netlify.app/).
+
+## O que dá para fazer
+
+- **Enviar vários vídeos de uma vez** (arrastar e soltar ou escolher no computador).
+- **Escolher o tipo de compressão:**
+  - **Por qualidade** — níveis *Leve*, *Equilibrado*, *Forte*, *Extrema* ou CRF manual.
+  - **Por tamanho alvo** — "quero que caiba em 16 MB" e o app calcula o bitrate.
+- **Escolher o formato de saída:** MP4/H.264 (padrão), WebM/VP8 e MP4/H.265 (HEVC,
+  disponível quando o modo turbo está ligado).
+- **Ajustar resolução** (até 4K, nunca aumenta a imagem), **quadros por segundo**,
+  **qualidade do áudio** ou remover o áudio.
+- **Ver o progresso** de cada arquivo com tempo restante estimado.
+- **Baixar** cada vídeo individualmente ou **todos de uma vez em um `.zip`**.
+
+### Formatos de entrada aceitos
+
+MP4, MOV, AVI, MKV, WebM, WMV/ASF, FLV, MPEG/MPG, MPEG-TS, 3GP, OGV, DV, VOB, MXF,
+ProRes, DNxHD e praticamente qualquer coisa que o FFmpeg leia — incluindo arquivos
+que o próprio navegador não consegue reproduzir.
+
+## Como usar
+
+Abra a página publicada (veja *Publicação* abaixo) e:
+
+1. **Envie os vídeos** no passo 1.
+2. **Escolha o tipo de compressão** no passo 2.
+3. Clique em **Comprimir tudo** e depois em **Baixar**.
+
+Na primeira vez o app baixa o motor de compressão (~32 MB). Ele fica guardado no
+cache do navegador, então as próximas vezes começam na hora.
+
+### Sobre os codecs
+
+O motor é o build WebAssembly do FFmpeg, e nem todo codificador funciona nele.
+O que está na interface foi testado no Chromium e no Node com o mesmo binário:
+
+| Saída | Situação |
+| --- | --- |
+| **MP4 / H.264** | funciona sempre — é o padrão |
+| **WebM / VP8** | funciona sempre |
+| **MP4 / H.265 (HEVC)** | só com o **modo turbo**; sem multi-thread o x265 trava ao criar o *thread pool*, então o app troca automaticamente por H.264 e avisa |
+| ~~WebM / VP9~~ | fora da lista: estoura a memória do WebAssembly e derruba a aba |
+
+Duas armadilhas encontradas nos testes e já contornadas no código: `-ac 2` junto
+com o libopus quebra o ffmpeg.wasm, e um erro de memória do WebAssembly inutiliza
+o motor — por isso o app o reinicia e tenta de novo automaticamente.
+
+### Modo turbo
+
+O ffmpeg multi-thread precisa que a página seja "isolada"
+(cabeçalhos `COOP`/`COEP`). Como o GitHub Pages não permite configurar cabeçalhos,
+o app registra um *service worker* que os adiciona — é isso que o botão **Modo turbo**
+faz. Ele deixa a compressão várias vezes mais rápida e libera o H.265, mas é
+opcional: sem ele tudo continua funcionando, só mais devagar.
+
+### Limites
+
+- Tudo roda na memória do navegador: arquivos acima de ~500 MB podem ficar lentos ou
+  falhar por falta de memória (o limite técnico do WebAssembly é 2 GB por processo).
+- O VP8 comprime menos que o H.264 no mesmo nível de qualidade; use-o quando
+  precisar de WebM.
+- No celular funciona, mas espere bem mais tempo e prefira vídeos curtos.
+
+## Desenvolvimento
+
+```console
+cd video-compressor
+npm install          # baixa o núcleo do ffmpeg usado nos testes
+npm run dev          # http://localhost:8080
+npm run dev -- --isolate   # liga COOP/COEP (modo turbo sem service worker)
+```
+
+Com o núcleo instalado localmente o servidor também o publica em `/vendor/core`,
+o que permite usar o app **sem internet**:
+`http://localhost:8080/?core=/vendor/core`.
+
+### Testes
+
+```console
+npm test             # comprime vídeos de verdade (MP4, MOV, AVI, MKV, WebM) e confere o resultado
+                     # 28 verificações, leva alguns minutos
+npm i -D playwright  # opcional, para o teste de navegador
+npm run test:browser # abre o app no Chromium, envia, comprime e baixa
+```
+
+O `npm test` gera vídeos de teste com o próprio ffmpeg, roda **os mesmos argumentos
+que a interface monta** e valida cada saída com o `ffprobe`: codec, resolução,
+duração, presença de áudio, ordem dos níveis de compressão e precisão do modo
+"tamanho alvo".
+
+## Publicação
+
+A pasta é um site estático puro (sem build). Qualquer hospedagem serve:
+
+- **GitHub Pages** — já existe o workflow
+  `.github/workflows/deploy-video-compressor.yml`. Basta ativar o Pages do
+  repositório em *Settings → Pages → Source: GitHub Actions*. A cada push na `main`
+  o site é republicado.
+- **Netlify / Vercel / S3** — publique o conteúdo de `video-compressor/`.
+- **Rede interna** — copie a pasta e sirva com qualquer servidor de arquivos.
+
+Para usar **sem depender do CDN** (rede fechada), copie
+`node_modules/@ffmpeg/core/dist/umd` para dentro do site e abra com
+`?core=/caminho/para/o/nucleo`. A versão multi-thread é procurada no mesmo
+caminho com o sufixo `-mt` (`/caminho/para/o/nucleo-mt`).
+
+## Como está organizado
+
+| Arquivo | Função |
+| --- | --- |
+| `index.html` | estrutura da página |
+| `assets/styles.css` | aparência (tema claro e escuro) |
+| `assets/app.js` | interface, fila de arquivos, progresso e downloads |
+| `assets/compression.js` | **regras de compressão** — transforma as opções em argumentos do ffmpeg |
+| `assets/ffmpeg-worker.js` | carrega o ffmpeg.wasm e executa as conversões fora da thread principal |
+| `assets/zip.js` | gera o `.zip` do "baixar tudo" |
+| `coi-serviceworker.js` | cabeçalhos do modo turbo |
+| `scripts/` | servidor local e testes automatizados |
+
+> O ffmpeg é distribuído sob licença GPL/LGPL. Este app apenas o carrega no
+> navegador a partir do CDN público do jsDelivr.

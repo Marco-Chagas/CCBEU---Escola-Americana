@@ -1,0 +1,16 @@
+{
+  "name": "video-compressor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Compressor de vídeo online que roda 100% no navegador (ffmpeg.wasm)",
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node scripts/test-compression.mjs",
+    "test:browser": "node scripts/test-browser.mjs"
+  },
+  "devDependencies": {
+    "@ffmpeg/core": "0.12.10",
+    "@ffmpeg/core-mt": "^0.12.10"
+  }
+}

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Compressor de Vídeo Online</title>
+    <meta
+      name="description"
+      content="Comprima vídeos de qualquer formato direto no navegador: escolha o tipo de compressão, envie os arquivos e baixe o resultado. Nada é enviado para servidores."
+    />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🎬%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="topo">
+      <div class="topo__marca">
+        <span class="topo__logo" aria-hidden="true">🎬</span>
+        <div>
+          <h1>Compressor de Vídeo</h1>
+          <p class="topo__sub">
+            Envie seus vídeos, escolha o tipo de compressão e baixe o resultado.
+            Tudo acontece dentro do seu navegador — nenhum arquivo é enviado para a internet.
+          </p>
+        </div>
+      </div>
+      <div class="motor" id="motor" data-estado="ocioso">
+        <span class="motor__bolinha" aria-hidden="true"></span>
+        <span class="motor__texto" id="motorTexto">Motor de compressão pronto para carregar</span>
+        <div class="motor__barra" hidden id="motorBarraCaixa"><div class="motor__barra-interna" id="motorBarra"></div></div>
+      </div>
+    </header>
+
+    <main>
+      <!-- 1. Upload ------------------------------------------------------->
+      <section class="cartao" aria-labelledby="tituloEnvio">
+        <h2 id="tituloEnvio"><span class="passo">1</span> Envie os vídeos</h2>
+        <div class="soltar" id="soltar" tabindex="0" role="button" aria-describedby="soltarAjuda">
+          <span class="soltar__icone" aria-hidden="true">⬆️</span>
+          <strong>Arraste os vídeos aqui ou clique para escolher</strong>
+          <span id="soltarAjuda" class="soltar__ajuda">
+            MP4, MOV, AVI, MKV, WMV, WebM, FLV, MPEG, 3GP, TS, ProRes e outros formatos.
+            Pode enviar vários de uma vez.
+          </span>
+          <input type="file" id="arquivos" accept="video/*,.mkv,.avi,.wmv,.flv,.mov,.m4v,.mpg,.mpeg,.ts,.3gp,.ogv,.mts,.m2ts,.vob,.asf,.divx,.dv,.mxf" multiple hidden />
+        </div>
+      </section>
+
+      <!-- 2. Opcoes ------------------------------------------------------->
+      <section class="cartao" aria-labelledby="tituloOpcoes">
+        <h2 id="tituloOpcoes"><span class="passo">2</span> Escolha o tipo de compressão</h2>
+
+        <div class="campo">
+          <span class="campo__rotulo">Como comprimir</span>
+          <div class="segmentado" role="radiogroup" aria-label="Modo de compressão">
+            <button type="button" class="segmentado__item" data-modo="quality" aria-pressed="true">
+              Por qualidade
+              <small>Você escolhe o nível, o tamanho sai como consequência</small>
+            </button>
+            <button type="button" class="segmentado__item" data-modo="size" aria-pressed="false">
+              Por tamanho alvo
+              <small>Você diz quantos MB quer, a qualidade se ajusta</small>
+            </button>
+          </div>
+        </div>
+
+        <div class="campo" id="blocoQualidade">
+          <span class="campo__rotulo">Nível de compressão</span>
+          <div class="niveis" id="niveis" role="radiogroup" aria-label="Nível de compressão"></div>
+          <div class="crf" id="blocoCrf" hidden>
+            <label for="crf">Qualidade manual (CRF <output id="crfValor">25</output>)</label>
+            <input type="range" id="crf" min="16" max="40" step="1" value="25" />
+            <div class="crf__legenda"><span>Mais qualidade</span><span>Menor arquivo</span></div>
+          </div>
+        </div>
+
+        <div class="campo" id="blocoTamanho" hidden>
+          <label class="campo__rotulo" for="tamanhoAlvo">Tamanho alvo por vídeo (MB)</label>
+          <div class="alvo">
+            <input type="number" id="tamanhoAlvo" min="1" max="4096" step="1" value="25" />
+            <div class="chips" id="chipsTamanho">
+              <button type="button" class="chip" data-mb="8">8 MB</button>
+              <button type="button" class="chip" data-mb="16">16 MB — WhatsApp</button>
+              <button type="button" class="chip" data-mb="25">25 MB — e-mail</button>
+              <button type="button" class="chip" data-mb="50">50 MB</button>
+              <button type="button" class="chip" data-mb="100">100 MB</button>
+            </div>
+          </div>
+          <p class="dica">
+            O tamanho final é aproximado (a variação costuma ficar em ±10%). Vídeos muito longos
+            podem ficar com a qualidade bem baixa para caber no alvo.
+          </p>
+        </div>
+
+        <div class="grade">
+          <div class="campo">
+            <label class="campo__rotulo" for="codec">Formato de saída</label>
+            <select id="codec"></select>
+            <p class="dica" id="dicaCodec"></p>
+          </div>
+          <div class="campo">
+            <label class="campo__rotulo" for="resolucao">Resolução</label>
+            <select id="resolucao"></select>
+            <p class="dica">Nunca aumentamos a imagem: vídeos menores que o valor escolhido ficam como estão.</p>
+          </div>
+          <div class="campo">
+            <label class="campo__rotulo" for="fps">Quadros por segundo</label>
+            <select id="fps"></select>
+            <p class="dica">Reduzir para 24 ou 30 fps economiza bastante em gravações de celular.</p>
+          </div>
+          <div class="campo">
+            <label class="campo__rotulo" for="audio">Áudio</label>
+            <select id="audio"></select>
+            <p class="dica">Remover o áudio deixa o arquivo bem menor quando o som não importa.</p>
+          </div>
+          <div class="campo">
+            <label class="campo__rotulo" for="velocidade">Velocidade da compressão</label>
+            <select id="velocidade"></select>
+            <p class="dica" id="dicaVelocidade"></p>
+          </div>
+          <div class="campo campo--turbo">
+            <span class="campo__rotulo">Modo turbo</span>
+            <label class="alternar">
+              <input type="checkbox" id="turbo" />
+              <span>Usar vários núcleos do processador</span>
+            </label>
+            <p class="dica" id="dicaTurbo">
+              Deixa a compressão várias vezes mais rápida e libera a saída em H.265.
+              A página recarrega uma vez para ativar.
+            </p>
+          </div>
+        </div>
+
+        <p class="resumo" id="resumo"></p>
+      </section>
+
+      <!-- 3. Fila --------------------------------------------------------->
+      <section class="cartao" aria-labelledby="tituloFila">
+        <div class="cartao__cabecalho">
+          <h2 id="tituloFila"><span class="passo">3</span> Comprimir e baixar</h2>
+          <div class="acoes">
+            <button type="button" id="comprimir" class="botao botao--primario" disabled>Comprimir tudo</button>
+            <button type="button" id="baixarTudo" class="botao" disabled>Baixar tudo (.zip)</button>
+            <button type="button" id="limpar" class="botao botao--discreto" disabled>Limpar lista</button>
+          </div>
+        </div>
+        <p class="vazio" id="vazio">Nenhum vídeo na fila ainda. Envie um arquivo no passo 1.</p>
+        <ul class="fila" id="fila"></ul>
+        <p class="total" id="total" hidden></p>
+      </section>
+
+      <details class="registro">
+        <summary>Registro técnico do ffmpeg</summary>
+        <pre id="registro" aria-live="off"></pre>
+      </details>
+    </main>
+
+    <footer class="rodape">
+      <p>
+        Funciona com <strong>ffmpeg.wasm</strong> executado no seu navegador. Os vídeos não são
+        enviados para nenhum servidor: o processamento usa o seu próprio computador.
+      </p>
+      <p class="rodape__aviso" id="avisoNavegador" hidden></p>
+    </footer>
+
+    <script type="module" src="assets/app.js"></script>
+  </body>
+</html>

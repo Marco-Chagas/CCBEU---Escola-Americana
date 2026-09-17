@@ -1,3 +1,25 @@
+# CCBEU / Escola Americana
+
+## 🎬 Compressor de Vídeo Online
+
+App para comprimir vídeos de qualquer formato direto no navegador — envie os
+arquivos, escolha o tipo de compressão (por qualidade ou por tamanho alvo) e baixe
+o resultado. Nenhum vídeo sai do computador.
+
+Código em [`video-compressor/`](video-compressor/README.md).
+
+```console
+cd video-compressor
+npm install
+npm run dev      # http://localhost:8080
+```
+
+Publicação automática no GitHub Pages pelo workflow
+[`deploy-video-compressor.yml`](.github/workflows/deploy-video-compressor.yml)
+(basta ativar *Settings → Pages → Source: GitHub Actions*).
+
+---
+
 # Remotion video
 
 <p align="center">
