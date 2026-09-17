@@ -96,14 +96,26 @@ duração, presença de áudio, ordem dos níveis de compressão e precisão do 
 
 ## Publicação
 
-A pasta é um site estático puro (sem build). Qualquer hospedagem serve:
+O app está no ar em
+**https://marco-chagas.github.io/CCBEU---Escola-Americana/video-compressor/**
 
-- **GitHub Pages** — já existe o workflow
-  `.github/workflows/deploy-video-compressor.yml`. Basta ativar o Pages do
-  repositório em *Settings → Pages → Source: GitHub Actions*. A cada push na `main`
-  o site é republicado.
-- **Netlify / Vercel / S3** — publique o conteúdo de `video-compressor/`.
-- **Rede interna** — copie a pasta e sirva com qualquer servidor de arquivos.
+A pasta é um site estático puro (sem build), publicado pelo GitHub Pages no modo
+*Deploy from a branch* (`main`, pasta raiz). Ou seja: **todo push na `main`
+republica o site sozinho**, sem workflow nenhum. O `index.html` da raiz do
+repositório redireciona para cá, e o `.nojekyll` impede o Jekyll de mexer nos
+arquivos.
+
+Qualquer outra hospedagem de arquivos estáticos também serve (Netlify, Vercel,
+S3, servidor interno): é só publicar o conteúdo de `video-compressor/`.
+
+### Instalar como aplicativo
+
+O `manifest.webmanifest` deixa o app instalável. No Chrome ou Edge, o menu
+oferece *Instalar* / *Instalar este site como um aplicativo* — isso cria o atalho
+na área de trabalho com o ícone próprio e abre o app em janela separada, sem
+barra de navegação. Os ícones estão em `assets/icones/` (gerados a partir de
+`icone.svg` e `icone-pequeno.svg`, esta segunda versão para 16–48 px) e o
+`favicon.ico` reúne os cinco tamanhos que o Windows usa.
 
 Para usar **sem depender do CDN** (rede fechada), copie
 `node_modules/@ffmpeg/core/dist/umd` para dentro do site e abra com
@@ -121,6 +133,8 @@ caminho com o sufixo `-mt` (`/caminho/para/o/nucleo-mt`).
 | `assets/ffmpeg-worker.js` | carrega o ffmpeg.wasm e executa as conversões fora da thread principal |
 | `assets/zip.js` | gera o `.zip` do "baixar tudo" |
 | `coi-serviceworker.js` | cabeçalhos do modo turbo |
+| `manifest.webmanifest` | permite instalar o app na área de trabalho |
+| `assets/icones/` | ícones do app (SVG de origem e PNGs gerados) |
 | `scripts/` | servidor local e testes automatizados |
 
 > O ffmpeg é distribuído sob licença GPL/LGPL. Este app apenas o carrega no

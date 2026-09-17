@@ -14,9 +14,10 @@ npm install
 npm run dev      # http://localhost:8080
 ```
 
-Publicação automática no GitHub Pages pelo workflow
-[`deploy-video-compressor.yml`](.github/workflows/deploy-video-compressor.yml)
-(basta ativar *Settings → Pages → Source: GitHub Actions*).
+**No ar em https://marco-chagas.github.io/CCBEU---Escola-Americana/video-compressor/** —
+publicado pelo GitHub Pages direto da branch `main` (pasta raiz), então todo push
+na `main` republica o site. No Chrome ou Edge dá para instalar o app pelo menu e
+ganhar um atalho na área de trabalho.
 
 ---
 
