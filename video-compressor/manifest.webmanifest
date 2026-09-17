@@ -1,0 +1,19 @@
+{
+  "name": "Compressor de Vídeo",
+  "short_name": "Compressor",
+  "description": "Comprima vídeos de qualquer formato direto no navegador, sem enviar nada para servidores.",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f5fb",
+  "theme_color": "#4f46e5",
+  "categories": ["utilities", "productivity", "video"],
+  "icons": [
+    { "src": "assets/icones/icone-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icones/icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icones/icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
