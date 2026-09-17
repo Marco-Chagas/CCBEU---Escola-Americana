@@ -143,8 +143,23 @@ export const AUDIO_MODES = [
   { value: 0, label: "Remover o audio" },
 ];
 
+/** Motores de compressao disponiveis. */
+export const ENGINES = [
+  {
+    value: "auto",
+    label: "Automático (recomendado)",
+    hint: "Usa a aceleração por hardware quando o navegador e o arquivo permitem; nos outros casos, o motor completo.",
+  },
+  {
+    value: "ffmpeg",
+    label: "Completo (ffmpeg)",
+    hint: "Mais lento, porém aceita todos os formatos e respeita o CRF exato. Use se algum vídeo sair estranho.",
+  },
+];
+
 /** Opcoes iniciais da interface. */
 export const DEFAULT_OPTIONS = {
+  engine: "auto",
   mode: "quality", // "quality" (CRF) ou "size" (tamanho alvo)
   level: "equilibrado",
   crf: 25,
@@ -386,4 +401,93 @@ export function formatDuration(seconds) {
   const s = total % 60;
   if (h) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// ---------------------------------------------------------------------------
+// Motor de hardware (WebCodecs)
+//
+// O ffmpeg trabalha com CRF ("qualidade alvo"); o codificador do hardware
+// trabalha com bitrate ("tamanho por segundo"). As funcoes abaixo traduzem as
+// mesmas opcoes da interface para essa outra linguagem, para que o resultado
+// fique parecido nos dois motores.
+// ---------------------------------------------------------------------------
+
+/** Nome de cada codec no mediabunny. */
+const CODEC_HARDWARE = { h264: "avc", h265: "hevc", vp8: "vp8" };
+
+/** Eficiencia relativa ao H.264: o H.265 entrega o mesmo com menos bitrate. */
+const EFICIENCIA = { h264: 1, h265: 0.65, vp8: 1.25 };
+
+/**
+ * Bits por pixel de referencia do H.264 no nivel "equilibrado" (CRF 25).
+ * Cada 6 pontos de CRF dobram ou reduzem pela metade o bitrate, que e a
+ * mesma regra pratica usada pelo x264.
+ */
+const BPP_REFERENCIA = 0.08;
+const CRF_REFERENCIA = 25;
+
+/** Bitrate de video (bits por segundo) equivalente a um CRF. */
+export function bitrateParaCrf(crf, largura, altura, fps, codecId) {
+  const pixels = Math.max(1, largura * altura);
+  const quadros = Number(fps) > 0 ? Number(fps) : 30;
+  const bpp = BPP_REFERENCIA * Math.pow(2, (CRF_REFERENCIA - crf) / 6);
+  const eficiencia = EFICIENCIA[codecId] || 1;
+  const bruto = pixels * quadros * bpp * eficiencia;
+  // limites de sanidade: nem 100 kbps num 4K, nem 50 Mbps num 360p
+  return Math.round(Math.min(Math.max(bruto, 150_000), 60_000_000));
+}
+
+/**
+ * Traduz as opcoes da interface para o formato do mediabunny.
+ *
+ * @param {object} options opcoes escolhidas na interface
+ * @param {object} source  { name, duration, width, height, fps, hasAudio }
+ * @returns opcoes do motor de hardware, ou null quando o codec nao tem
+ *          equivalente (ai a interface usa o motor completo)
+ */
+export function buildHardwareJob(options, source = {}) {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+  const codecId = CODECS[opts.codec] ? opts.codec : DEFAULT_OPTIONS.codec;
+  const codec = CODECS[codecId];
+  const videoCodec = CODEC_HARDWARE[codecId];
+  if (!videoCodec) return null;
+
+  const alturaOriginal = Number(source.height) || 0;
+  const larguraOriginal = Number(source.width) || 0;
+  const altura = resolveOutputHeight(opts, source);
+  const escala = alturaOriginal && altura ? altura / alturaOriginal : 1;
+  const largura = larguraOriginal ? Math.round((larguraOriginal * escala) / 2) * 2 : 0;
+
+  const fpsOriginal = Number(source.fps) || 30;
+  const fps = Number(opts.fps) ? Math.min(Number(opts.fps), fpsOriginal) : 0;
+
+  const audioBitrate = Number(opts.audioBitrate) || 0;
+  const manterAudio = audioBitrate > 0 && source.hasAudio !== false;
+
+  const duracao = Number(source.duration) || 0;
+  const porTamanho = opts.mode === "size" && duracao > 0;
+
+  const videoBitrate = porTamanho
+    ? bitrateForTargetSize(opts.targetSizeMB, duracao, manterAudio ? audioBitrate : 0) * 1000
+    : bitrateParaCrf(resolveCrf(opts), largura || 1280, altura || 720, fps || fpsOriginal, codecId);
+
+  return {
+    container: codec.ext === "webm" ? "webm" : "mp4",
+    mime: codec.mime,
+    videoCodec,
+    audioCodec: codec.ext === "webm" ? "opus" : "aac",
+    largura: largura || undefined,
+    altura: altura || undefined,
+    fps: fps || undefined,
+    videoBitrate,
+    audioBitrate: manterAudio ? audioBitrate * 1000 : 0,
+    manterAudio,
+    outputName: outputFileName(source.name || "video", codecId),
+    codec: codecId,
+    summary: `${codec.label} • ${
+      porTamanho ? `alvo ~${opts.targetSizeMB} MB` : `qualidade ${QUALITY_LEVELS[opts.level].label}`
+    } • ${altura ? `${altura}p` : "resolução original"} • ${Math.round(videoBitrate / 1000)} kbps${
+      manterAudio ? ` • áudio ${audioBitrate} kbps` : " • sem áudio"
+    }`,
+  };
 }

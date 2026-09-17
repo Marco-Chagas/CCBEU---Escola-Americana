@@ -6,6 +6,10 @@ App para comprimir vídeos de qualquer formato direto no navegador — envie os
 arquivos, escolha o tipo de compressão (por qualidade ou por tamanho alvo) e baixe
 o resultado. Nenhum vídeo sai do computador.
 
+Usa o **codificador de vídeo do próprio computador** (WebCodecs) quando o
+navegador permite, e cai para o ffmpeg.wasm nos formatos que o hardware não
+aceita — sem o usuário precisar escolher nada.
+
 Código em [`video-compressor/`](video-compressor/README.md).
 
 ```console
